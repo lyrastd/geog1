@@ -30,7 +30,7 @@ import_dotenv.default.config();
 var app = (0, import_express.default)();
 var PORT = 3e3;
 app.use(import_express.default.json());
-var DEFAULT_MAPILLARY_TOKEN = "MLY|4602901929767228|7cf32607fa6ca1fb83a6b86d9f67a6fb";
+var DEFAULT_MAPILLARY_TOKEN = "MLY|27228156226813433|ff4d941ae45e04063527011e661063bc";
 var MAPILLARY_TOKEN = process.env.MAPILLARY_CLIENT_TOKEN || process.env.MAPILLARY_TOKEN || DEFAULT_MAPILLARY_TOKEN;
 app.get("/api/config", (req, res) => {
   res.json({
