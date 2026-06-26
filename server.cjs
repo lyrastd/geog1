@@ -26,10 +26,29 @@ var import_express = __toESM(require("express"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_dotenv = __toESM(require("dotenv"), 1);
 var import_vite = require("vite");
+var import_genai = require("@google/genai");
 import_dotenv.default.config();
 var app = (0, import_express.default)();
 var PORT = 3e3;
 app.use(import_express.default.json());
+var aiClient = null;
+function getGeminiClient() {
+  if (!aiClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      throw new Error("A vari\xE1vel de ambiente GEMINI_API_KEY n\xE3o est\xE1 configurada.");
+    }
+    aiClient = new import_genai.GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build"
+        }
+      }
+    });
+  }
+  return aiClient;
+}
 var DEFAULT_MAPILLARY_TOKEN = "MLY|27228156226813433|ff4d941ae45e04063527011e661063bc";
 var MAPILLARY_TOKEN = process.env.MAPILLARY_CLIENT_TOKEN || process.env.MAPILLARY_TOKEN || DEFAULT_MAPILLARY_TOKEN;
 app.get("/api/config", (req, res) => {
@@ -98,7 +117,7 @@ app.get("/api/mapillary/search", async (req, res) => {
   }
   console.log("[Mapillary] Nenhum ponto encontrado nas proximidades. Usando fallback de seguran\xE7a.");
   return res.json({
-    imageId: "461019685608643",
+    imageId: "142364711204983",
     // Copacabana Rio fallback
     coordinates: { lat: -22.9711, lng: -43.1822 },
     capturedAt: 1618394800,
@@ -138,22 +157,126 @@ async function fetchCountryDetails(countryCode) {
   }
   return null;
 }
-function generateLocalHint(level, latitude, longitude) {
-  const latDir = latitude >= 0 ? "Norte" : "Sul";
-  const lngDir = longitude >= 0 ? "Leste" : "Oeste";
-  if (level === 3) {
-    return `\u{1F5FA}\uFE0F Dossi\xEA Cultural (Sutil): Este local situa-se em um territ\xF3rio na latitude ${Math.abs(latitude).toFixed(1)}\xB0 ${latDir}. O tr\xE1fego segue regras locais consolidadas e as redondezas exibem uma mistura de vegeta\xE7\xE3o e tra\xE7os arquitet\xF4nicos residenciais t\xEDpicos desta faixa clim\xE1tica do globo.`;
-  } else {
-    return `\u{1F6E3}\uFE0F Dossi\xEA Regional (Sutil): A paisagem urbana e vi\xE1ria ao redor reflete as caracter\xEDsticas geogr\xE1ficas na longitude ${Math.abs(longitude).toFixed(1)}\xB0 ${lngDir}. \xC9 poss\xEDvel notar detalhes de postes de servi\xE7os p\xFAblicos e asfalto com pavimenta\xE7\xE3o t\xEDpica desta zona.`;
+function generateLocalHint(level, latitude, longitude, continent, drivingSide, timezone, tld, currencyText, bordersText) {
+  const hemLat = latitude >= 0 ? "Hemisf\xE9rio Norte" : "Hemisf\xE9rio Sul";
+  const hemLng = longitude >= 0 ? "Hemisf\xE9rio Oriental" : "Hemisf\xE9rio Ocidental";
+  switch (level) {
+    case 1:
+      return `\u{1F310} Orienta\xE7\xE3o Espacial: Este local est\xE1 situado no ${continent}, integrando o ${hemLat} e ${hemLng}. Os ve\xEDculos trafegam pelo ${drivingSide} e o fuso hor\xE1rio de refer\xEAncia \xE9 ${timezone}.`;
+    case 2:
+      return `\u{1F373} Identidade Local: A moeda oficial \xE9 ${currencyText}. O sufixo de internet local \xE9 ${tld} e o pa\xEDs ${bordersText.toLowerCase()}. A gastronomia regional apresenta pratos ricos em ingredientes tradicionais do continente.`;
+    case 3:
+      return `\u{1F4DA} Fato Geral: A regi\xE3o possui forte heran\xE7a cultural, com uma rica mistura de influ\xEAncias hist\xF3ricas expressas na arquitetura local e nos h\xE1bitos cotidianos das pessoas.`;
+    case 4:
+      return `\u{1F3A8} Caracter\xEDsticas Culturais: A vegeta\xE7\xE3o predominante, o desenho das constru\xE7\xF5es e os letreiros com caracteres t\xEDpicos das redondezas contam a hist\xF3ria e a identidade vibrante deste ponto geogr\xE1fico.`;
+    default:
+      return "Nenhuma pista dispon\xEDvel para este n\xEDvel.";
   }
 }
+var FREE_BASE_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-1.5-flash"
+];
+function withTimeout(promise, ms, errorMessage = "Timeout") {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+async function generateGeminiHint(level, latitude, longitude, placeName, description, continent, drivingSide, timezone, tld, currencyText, bordersText) {
+  const ai = getGeminiClient();
+  const hintGuides = {
+    1: {
+      focusName: "Geogr\xE1fica (espa\xE7o f\xEDsico, relevo, hemisf\xE9rio e clima)",
+      focusInstructions: "Foque em aspectos geogr\xE1ficos f\xEDsicos e de orienta\xE7\xE3o global (como continente, hemisf\xE9rio, bioma, vegeta\xE7\xE3o, relevo, fuso hor\xE1rio ou sentido de fluxo do tr\xE2nsito)."
+    },
+    2: {
+      focusName: "Gastron\xF4mica (culin\xE1ria, pratos e ingredientes tradicionais)",
+      focusInstructions: "Foque em pratos t\xEDpicos, temperos ou culin\xE1ria associada a esta heran\xE7a regional, descrevendo sabores ou ingredientes comuns sem revelar o nome do pa\xEDs."
+    },
+    3: {
+      focusName: "Conhecimentos Gerais (marcos, fatos hist\xF3ricos e geopol\xEDticos)",
+      focusInstructions: "Foque em fatos de conhecimento geral, eventos de relev\xE2ncia hist\xF3rica ou trivia sutil sobre o local, como fronteiras, economia, moeda ou sufixo nacional de dom\xEDnio."
+    },
+    4: {
+      focusName: "Cultural (estilo de vida, idioma e h\xE1bitos locais)",
+      focusInstructions: "Foque na identidade e costumes locais, folclore, caracter\xEDsticas ou som/alfabeto do idioma falado por l\xE1 e tra\xE7os arquitet\xF4nicos residenciais t\xEDpicos."
+    }
+  };
+  const currentGuide = hintGuides[level] || hintGuides[1];
+  const systemInstruction = `Voc\xEA \xE9 o mestre de dicas do GeoGuessr 360. Seu objetivo \xE9 ajudar o jogador gerando dicas \xFAteis, intrigantes e realistas baseadas estritamente nos dados de geolocaliza\xE7\xE3o e refer\xEAncias reais fornecidas.
+
+DIRETRIZES R\xCDGIDAS DE SEGURAN\xC7A E N\xC3O ALUCINA\xC7\xC3O:
+1. NUNCA revele n\xFAmeros de coordenadas geogr\xE1ficas ou sequ\xEAncias de latitude/longitude (como 48.8, 2.29, etc.).
+2. NUNCA mencione explicitamente o nome do pa\xEDs, estado, prov\xEDncia, cidade ou o nome oficial exato da atra\xE7\xE3o tur\xEDstica. Em vez disso, use sempre termos descritivos elegantes (ex: use "este famoso pa\xEDs sul-americano", "esta metr\xF3pole litor\xE2nea", "este imponente pal\xE1cio de ferro").
+3. N\xC3O INVENTE FATOS FALSOS OU HIST\xD3RIAS DE FANTASIA. Baseie sua resposta apenas em caracter\xEDsticas geogr\xE1ficas, hist\xF3ricas e culturais genu\xEDnas.
+4. Responda em portugu\xEAs brasileiro fluente.`;
+  const prompt = `Escreva em poucas palavras uma dica inteligente de car\xE1ter ${currentGuide.focusName} para o local descrito abaixo, sem revelar o nome do local ou pa\xEDs de forma alguma:
+
+Dados do Local Real:
+- Atra\xE7\xE3o Tur\xEDstica: "${placeName}"
+- Detalhes: "${description}"
+- Continente/Regi\xE3o: ${continent}
+- Sentido do Tr\xE2nsito: ${drivingSide}
+- Fuso Hor\xE1rio aproximado: ${timezone}
+- Moeda Corrente: ${currencyText}
+- Dom\xEDnio de Internet Nacional (TLD): ${tld}
+- Fronteira Terrestre: ${bordersText}
+- Coordenadas Gerais: Latitude ${latitude >= 0 ? "Norte" : "Sul"}, Longitude ${longitude >= 0 ? "Oriental" : "Ocidental"}
+
+Instru\xE7\xF5es Adicionais: ${currentGuide.focusInstructions}
+Lembre-se: Escreva apenas um par\xE1grafo curto de no m\xE1ximo 2 a 3 frases objetivas e intrigantes.`;
+  for (const modelId of FREE_BASE_MODELS) {
+    try {
+      console.log(`[Gemini API] Tentando gerar dica com modelo base gratuito: ${modelId} (N\xEDvel: ${level})`);
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: modelId,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            temperature: 0.65,
+            maxOutputTokens: 800
+          }
+        }),
+        12e3,
+        `Timeout do modelo ${modelId}`
+      );
+      const text = response.text?.trim();
+      if (text) {
+        return text;
+      }
+    } catch (err) {
+      console.warn(`[Gemini API] Erro ou Timeout com o modelo ${modelId}:`, err.message || err);
+    }
+  }
+  throw new Error("Todos os modelos de IA gratuitos falharam ou excederam o tempo limite.");
+}
+function safetyFilter(text, wordsToRedact) {
+  let filtered = text;
+  filtered = filtered.replace(/\b\d{1,3}[.,]\d{1,6}\b/gi, "[COORDENADAS]");
+  filtered = filtered.replace(/\d+([.,]\d+)?\s*[°º]?[^\w\s]*(Norte|Sul|Leste|Oeste|N|S|E|W|L)?/gi, "[COORDENADAS]");
+  const sortedWords = [...wordsToRedact].filter((w) => w && w.trim().length > 2).map((w) => w.trim()).sort((a, b) => b.length - a.length);
+  for (const word of sortedWords) {
+    const escaped = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\w*\\b`, "gi");
+    filtered = filtered.replace(regex, "[REVELADO]");
+  }
+  return filtered;
+}
 app.post("/api/hints/fetch", async (req, res) => {
-  const { lat, lng, placeName, level } = req.body;
+  const { lat, lng, placeName, description, level } = req.body;
   if (!lat || !lng || !level) {
     return res.status(400).json({ error: "Latitude, longitude e n\xEDvel s\xE3o obrigat\xF3rios." });
   }
   const latitude = parseFloat(lat);
   const longitude = parseFloat(lng);
+  const locDescription = description || "";
   try {
     const address = await fetchAddressDetails(latitude, longitude);
     const rawCountry = address?.country || "Pa\xEDs Secreto";
@@ -163,6 +286,22 @@ app.post("/api/hints/fetch", async (req, res) => {
     let countryDetails = null;
     if (countryCode) {
       countryDetails = await fetchCountryDetails(countryCode);
+    }
+    const continent = countryDetails?.continents?.[0] || countryDetails?.subregion || "Territ\xF3rio Global";
+    const drivingSide = countryDetails?.car?.side === "left" ? "Lado Esquerdo (M\xE3o Inglesa)" : "Lado Direito";
+    const timezone = countryDetails?.timezones?.[0] || "UTC / Vari\xE1vel";
+    const tld = countryDetails?.tld?.[0] || "N\xE3o listado";
+    let currencyText = "N\xE3o dispon\xEDvel";
+    if (countryDetails?.currencies) {
+      const keys = Object.keys(countryDetails.currencies);
+      if (keys.length > 0) {
+        const cur = countryDetails.currencies[keys[0]];
+        currencyText = `${cur.name} (${cur.symbol || keys[0]})`;
+      }
+    }
+    let bordersText = "Nenhuma fronteira terrestre";
+    if (countryDetails?.borders && countryDetails.borders.length > 0) {
+      bordersText = `Faz fronteira terrestre com ${countryDetails.borders.length} outro(s) territ\xF3rio(s)`;
     }
     const wordsToRedact = [rawCountry, rawState, rawCity];
     if (countryCode && countryCode.length > 1) {
@@ -192,46 +331,37 @@ app.post("/api/hints/fetch", async (req, res) => {
       wordsToRedact.push("Espanha", "Spain", "espanhol", "espanhola", "espanh\xF3is", "espanholas");
     }
     let hintText = "";
-    switch (level) {
-      case 1: {
-        const continent = countryDetails?.continents?.[0] || countryDetails?.subregion || "Territ\xF3rio Global";
-        const drivingSide = countryDetails?.car?.side === "left" ? "Lado Esquerdo (M\xE3o Inglesa)" : "Lado Direito";
-        const hemLat = latitude >= 0 ? "Hemisf\xE9rio Norte" : "Hemisf\xE9rio Sul";
-        const hemLng = longitude >= 0 ? "Hemisf\xE9rio Oriental" : "Hemisf\xE9rio Ocidental";
-        const timezone = countryDetails?.timezones?.[0] || "UTC / Vari\xE1vel";
-        hintText = `\u{1F310} Continente: ${continent} | \u{1F9ED} Coordenadas: Localizado no ${hemLat} e ${hemLng} | \u{1F697} Sentido do Tr\xE2nsito: ${drivingSide} | \u{1F552} Fuso Hor\xE1rio Principal: ${timezone}`;
-        break;
-      }
-      case 2: {
-        const tld = countryDetails?.tld?.[0] || "N\xE3o listado";
-        let currencyText = "N\xE3o dispon\xEDvel";
-        if (countryDetails?.currencies) {
-          const keys = Object.keys(countryDetails.currencies);
-          if (keys.length > 0) {
-            const cur = countryDetails.currencies[keys[0]];
-            currencyText = `${cur.name} (${cur.symbol || keys[0]})`;
-          }
-        }
-        let bordersText = "Nenhuma fronteira terrestre";
-        if (countryDetails?.borders && countryDetails.borders.length > 0) {
-          bordersText = `Faz fronteira terrestre com ${countryDetails.borders.length} outro(s) territ\xF3rio(s)`;
-        }
-        hintText = `\u{1F310} Dom\xEDnio de Internet Nacional: ${tld} | \u{1FA99} Moeda Corrente: ${currencyText} | \u{1F465} Fronteiras Terrestres: ${bordersText}`;
-        break;
-      }
-      case 3: {
-        hintText = generateLocalHint(3, latitude, longitude);
-        break;
-      }
-      case 4: {
-        hintText = generateLocalHint(4, latitude, longitude);
-        break;
-      }
-      default:
-        hintText = "Nenhuma pista dispon\xEDvel para este n\xEDvel.";
+    try {
+      hintText = await generateGeminiHint(
+        level,
+        latitude,
+        longitude,
+        placeName || "Local Secreto",
+        locDescription,
+        continent,
+        drivingSide,
+        timezone,
+        tld,
+        currencyText,
+        bordersText
+      );
+    } catch (geminiErr) {
+      console.warn("[Gemini API Hints Fallback] Usando gerador de dicas local seguro:", geminiErr);
+      hintText = generateLocalHint(
+        level,
+        latitude,
+        longitude,
+        continent,
+        drivingSide,
+        timezone,
+        tld,
+        currencyText,
+        bordersText
+      );
     }
+    const filteredHint = safetyFilter(hintText, wordsToRedact);
     return res.json({
-      hint: hintText,
+      hint: filteredHint,
       country: rawCountry
     });
   } catch (err) {
