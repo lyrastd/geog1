@@ -174,8 +174,8 @@ function generateLocalHint(level, latitude, longitude, continent, drivingSide, t
   }
 }
 var FREE_BASE_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-1.5-flash"
+  "gemini-3.5-flash",
+  "gemini-2.5-flash"
 ];
 function withTimeout(promise, ms, errorMessage = "Timeout") {
   let timeoutId;
@@ -215,7 +215,8 @@ DIRETRIZES R\xCDGIDAS DE SEGURAN\xC7A E N\xC3O ALUCINA\xC7\xC3O:
 1. NUNCA revele n\xFAmeros de coordenadas geogr\xE1ficas ou sequ\xEAncias de latitude/longitude (como 48.8, 2.29, etc.).
 2. NUNCA mencione explicitamente o nome do pa\xEDs, estado, prov\xEDncia, cidade ou o nome oficial exato da atra\xE7\xE3o tur\xEDstica. Em vez disso, use sempre termos descritivos elegantes (ex: use "este famoso pa\xEDs sul-americano", "esta metr\xF3pole litor\xE2nea", "este imponente pal\xE1cio de ferro").
 3. N\xC3O INVENTE FATOS FALSOS OU HIST\xD3RIAS DE FANTASIA. Baseie sua resposta apenas em caracter\xEDsticas geogr\xE1ficas, hist\xF3ricas e culturais genu\xEDnas.
-4. Responda em portugu\xEAs brasileiro fluente.`;
+4. Responda em portugu\xEAs brasileiro fluente, correto e natural. Nunca use palavras em ingl\xEAs (como usar "predominant" em vez de "predominante").
+5. Conclua SEMPRE todas as frases por completo. NUNCA deixe o texto cortado ou com ideias inacabadas no final.`;
   const prompt = `Escreva em poucas palavras uma dica inteligente de car\xE1ter ${currentGuide.focusName} para o local descrito abaixo, sem revelar o nome do local ou pa\xEDs de forma alguma:
 
 Dados do Local Real:
@@ -230,7 +231,7 @@ Dados do Local Real:
 - Coordenadas Gerais: Latitude ${latitude >= 0 ? "Norte" : "Sul"}, Longitude ${longitude >= 0 ? "Oriental" : "Ocidental"}
 
 Instru\xE7\xF5es Adicionais: ${currentGuide.focusInstructions}
-Lembre-se: Escreva apenas um par\xE1grafo curto de no m\xE1ximo 2 a 3 frases objetivas e intrigantes.`;
+Lembre-se: Escreva apenas um par\xE1grafo curto de no m\xE1ximo 2 a 3 frases objetivas, intrigantes e COMPLETAS. Nunca deixe a \xFAltima frase cortada.`;
   for (const modelId of FREE_BASE_MODELS) {
     try {
       console.log(`[Gemini API] Tentando gerar dica com modelo base gratuito: ${modelId} (N\xEDvel: ${level})`);
